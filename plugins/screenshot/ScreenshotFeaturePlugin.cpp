@@ -63,7 +63,7 @@ bool ScreenshotFeaturePlugin::controlFeature( Feature::Uid featureUid,
 		for( const auto& controlInterface : computerControlInterfaces )
 		{
 			if (VeyonCore::component() == VeyonCore::Component::CLI &&
-				controlInterface->framebuffer().isNull())
+				controlInterface->hasValidFramebuffer() == false)
 			{
 				// maximum time to wait for the first framebuffer update when the feature is
 				// invoked right after connecting (e.g. via CLI or WebAPI)
