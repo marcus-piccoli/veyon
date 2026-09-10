@@ -25,6 +25,12 @@
  *
  */
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windns.h>
+#endif
+
 #include <rfb/rfbclient.h>
 
 #include <cstdio>
@@ -34,6 +40,7 @@
 #include <QMutexLocker>
 #include <QPixmap>
 #include <QRegularExpression>
+#include <QStringList>
 #include <QTime>
 
 #include "PlatformNetworkFunctions.h"
@@ -42,6 +49,51 @@
 #include "SocketDevice.h"
 #include "VncEvents.h"
 
+
+#ifdef _WIN32
+static QStringList resolveFreshIpv4Addresses( const QString& host )
+{
+	QHostAddress literalAddress( host );
+	if( literalAddress.protocol() == QAbstractSocket::IPv4Protocol )
+	{
+		return { literalAddress.toString() };
+	}
+
+	PDNS_RECORDW records = nullptr;
+	const auto status = DnsQuery_W( reinterpret_cast<PCWSTR>( host.utf16() ),
+								 DNS_TYPE_A,
+								 DNS_QUERY_BYPASS_CACHE,
+								 nullptr,
+								 &records,
+								 nullptr );
+
+	if( status != ERROR_SUCCESS )
+	{
+		vDebug() << "Veyon Fix fresh DNS lookup failed for" << host << "status" << status;
+		return {};
+	}
+
+	QStringList addresses;
+	for( auto record = records; record != nullptr; record = record->pNext )
+	{
+		if( record->wType == DNS_TYPE_A )
+		{
+			IN_ADDR nativeAddress{};
+			nativeAddress.s_addr = record->Data.A.IpAddress;
+
+			char addressBuffer[INET_ADDRSTRLEN]{};
+			if( inet_ntop( AF_INET, &nativeAddress, addressBuffer, sizeof(addressBuffer) ) != nullptr )
+			{
+				addresses.append( QString::fromLatin1(addressBuffer) );
+			}
+		}
+	}
+
+	DnsRecordListFree( records, DnsFreeRecordList );
+	addresses.removeDuplicates();
+	return addresses;
+}
+#endif
 
 rfbBool VncConnection::hookInitFrameBuffer( rfbClient* client )
 {
@@ -491,6 +543,7 @@ void VncConnection::run()
 void VncConnection::establishConnection()
 {
 	QMutex sleeperMutex;
+	int freshDnsAddressIndex = 0;
 
 	setState( State::Connecting );
 	setControlFlag( ControlFlag::RestartConnection, false );
@@ -517,6 +570,28 @@ void VncConnection::establishConnection()
 
 		Q_EMIT connectionPrepared();
 
+		QString configuredHost;
+		{
+			QMutexLocker locker( &m_globalMutex );
+			configuredHost = m_host;
+		}
+
+		QString connectionHost = configuredHost;
+#ifdef _WIN32
+		const auto freshAddresses = resolveFreshIpv4Addresses( configuredHost );
+		if( freshAddresses.isEmpty() == false )
+		{
+			connectionHost = freshAddresses.at( freshDnsAddressIndex % int(freshAddresses.size()) );
+			++freshDnsAddressIndex;
+			vDebug() << "Veyon Fix fresh DNS:" << configuredHost << "->" << freshAddresses
+					 << "using" << connectionHost;
+		}
+		else
+		{
+			vDebug() << "Veyon Fix fresh DNS: falling back to configured host" << configuredHost;
+		}
+#endif
+
 		m_globalMutex.lock();
 
 		if( m_port < 0 ) // use default port?
@@ -529,7 +604,7 @@ void VncConnection::establishConnection()
 		}
 
 		free( m_client->serverHost );
-		m_client->serverHost = strdup( m_host.toUtf8().constData() );
+		m_client->serverHost = strdup( connectionHost.toUtf8().constData() );
 
 		m_globalMutex.unlock();
 
@@ -570,7 +645,7 @@ void VncConnection::establishConnection()
 				}
 				else
 				{
-					const auto pingResult = VeyonCore::platform().networkFunctions().ping(m_host);
+					const auto pingResult = VeyonCore::platform().networkFunctions().ping(connectionHost);
 					switch (pingResult)
 					{
 					case PlatformNetworkFunctions::PingResult::ReplyReceived:

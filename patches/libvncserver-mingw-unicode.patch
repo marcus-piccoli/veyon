@@ -1,0 +1,13 @@
+diff --git a/src/libvncserver/main.c b/src/libvncserver/main.c
+index b18f630..1e7860f 100644
+--- a/src/libvncserver/main.c
++++ b/src/libvncserver/main.c
+@@ -1039,7 +1039,7 @@ rfbScreenInfoPtr rfbGetScreen(int* argc,char** argv,
+ #ifdef WIN32
+    {
+ 	   DWORD dummy=255;
+-	   GetComputerName(screen->thisHost,&dummy);
++	   GetComputerNameA(screen->thisHost,&dummy);
+    }
+ #else
+    gethostname(screen->thisHost, 255);

@@ -34,6 +34,10 @@ if(Qt6HttpServer_DIR OR Qt5HttpServer_DIR OR (Qt5Core_VERSION VERSION_GREATER 5.
 
 	set_source_files_properties(WebApiHttpServer.cpp PROPERTIES SKIP_UNITY_BUILD_INCLUSION TRUE SKIP_PRECOMPILE_HEADERS TRUE)
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(webapi PRIVATE -Wno-error=sfinae-incomplete)
+endif()
+
 	if(Qt6HttpServer_DIR)
 		target_link_libraries(webapi PRIVATE Qt6::HttpServer)
 	elseif(Qt5HttpServer_DIR)
