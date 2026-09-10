@@ -1,0 +1,49 @@
+name: "Veyon Fix Source Bundle"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "veyon-fix/fresh-dns-windows"
+    paths:
+      - "patches/apply_veyon_fix.py"
+      - "BUILD_VEYON_FIX_WINDOWS.md"
+      - ".github/workflows/veyon-fix-source-bundle.yml"
+
+jobs:
+  package-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Apply Veyon Fix source changes
+        run: python3 patches/apply_veyon_fix.py
+
+      - name: Validate source tree
+        run: |
+          git diff --check
+          grep -q "Veyon Fix fresh DNS:" core/src/VncConnection.cpp
+          grep -q -- "-ldnsapi" core/CMakeLists.txt
+
+      - name: Prepare source directory
+        run: |
+          rm -rf dist
+          mkdir -p dist/veyon-fix-4.11.2-source
+          rsync -a --exclude='.git' --exclude='dist' ./ dist/veyon-fix-4.11.2-source/
+          cp BUILD_VEYON_FIX_WINDOWS.md dist/veyon-fix-4.11.2-source/
+
+      - name: Create ZIP
+        run: |
+          cd dist
+          zip -r -9 veyon-fix-4.11.2-source.zip veyon-fix-4.11.2-source
+
+      - name: Upload source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: veyon-fix-4.11.2-source
+          path: dist/veyon-fix-4.11.2-source.zip
+          if-no-files-found: error
