@@ -1,0 +1,41 @@
+name: "Veyon Fix Windows x64"
+
+on:
+  push:
+    branches:
+      - "veyon-fix/fresh-dns-windows"
+  workflow_dispatch:
+
+jobs:
+  build-windows-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Apply fresh DNS patch
+        run: git apply --check patches/veyon-fix-fresh-dns-windows.patch && git apply patches/veyon-fix-fresh-dns-windows.patch
+
+      - name: Build Windows x64 using Veyon CI image
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/veyon" \
+            -w /veyon \
+            veyon/ci-mingw-w64:main \
+            bash -lc '.ci/windows/build.sh x86_64'
+
+      - name: Collect build outputs
+        run: |
+          mkdir -p artifacts
+          find . -maxdepth 2 -type f \( -iname 'veyon-*win*.exe' -o -iname 'veyon-*win*.zip' -o -iname 'veyon-*win*.msi' \) -print -exec cp -v {} artifacts/ \;
+          test -n "$(find artifacts -type f -print -quit)"
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: veyon-fix-4.11.2-windows-x64
+          path: artifacts/*
+          if-no-files-found: error
