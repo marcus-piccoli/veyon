@@ -1,93 +1,120 @@
-# Veyon Fix 4.11.2 - Build local no Windows
+# Veyon Fix 4.11.2 - build reproduzível no Windows
 
-Este branch contém a correção de resolução DNS para Windows usada no projeto Veyon Fix.
+Este branch contém a correção do Veyon Fix para manter o hostname como identidade permanente e fazer uma nova resolução IPv4 no Windows antes de cada tentativa VNC, usando `DNS_QUERY_BYPASS_CACHE` e fallback para o hostname original.
 
-## Objetivo
+As alterações funcionais já fazem parte do próprio branch. Em um clone novo deste branch **não execute `patches/apply_veyon_fix.py`**. O script foi usado em uma etapa anterior do desenvolvimento e não é necessário para a build atual.
 
-Manter o hostname como identidade permanente e obter um IPv4 temporário e atualizado antes de cada tentativa VNC no Windows, usando `DNS_QUERY_BYPASS_CACHE` e fallback para o hostname original.
+## Ambiente suportado
 
-## Opção recomendada: build com MSYS2/MinGW-w64
+O fluxo reproduzível local foi preparado para **MSYS2 UCRT64 / Windows x64**. Não execute o script pelo terminal MINGW64 ou pelo Git Bash comum; ele valida `MSYSTEM=UCRT64` e aborta se estiver no ambiente errado.
 
-O Veyon 4.11.2 usa Qt 6 e CMake. Para reproduzir o ambiente do projeto com o mínimo de diferenças, prefira uma toolchain MinGW-w64 x86_64 com Qt 6, Ninja, CMake e NSIS.
-
-### 1. Instalar ferramentas
-
-Instale:
-
-- Git for Windows
-- CMake
-- Ninja
-- Python 3
-- NSIS
-- MSYS2
-- Qt 6 para MinGW 64-bit, incluindo Qt Network, Widgets, Concurrent e LinguistTools
-
-No MSYS2, instale a toolchain MinGW-w64 x86_64 e dependências de desenvolvimento exigidas pelo Veyon conforme os erros reportados pelo CMake.
-
-### 2. Obter o source completo
-
-Se estiver usando o ZIP gerado pelo workflow `Veyon Fix Source Bundle`, extraia-o para um caminho curto, por exemplo:
-
-`C:\dev\veyon-fix`
-
-Se estiver usando Git:
+Um conjunto de pacotes equivalente ao ambiente testado pode ser instalado no terminal MSYS2 UCRT64 com:
 
 ```bash
-git clone --recurse-submodules https://github.com/marcus-piccoli/veyon.git
+pacman -S --needed \
+  mingw-w64-ucrt-x86_64-toolchain \
+  mingw-w64-ucrt-x86_64-cmake \
+  mingw-w64-ucrt-x86_64-ninja \
+  mingw-w64-ucrt-x86_64-qt6-base \
+  mingw-w64-ucrt-x86_64-qt6-5compat \
+  mingw-w64-ucrt-x86_64-qt6-tools \
+  mingw-w64-ucrt-x86_64-qt6-httpserver \
+  mingw-w64-ucrt-x86_64-qca-qt6 \
+  mingw-w64-ucrt-x86_64-openssl \
+  mingw-w64-ucrt-x86_64-zlib \
+  mingw-w64-ucrt-x86_64-libpng \
+  mingw-w64-ucrt-x86_64-libjpeg-turbo \
+  mingw-w64-ucrt-x86_64-lzo2 \
+  mingw-w64-ucrt-x86_64-openldap \
+  mingw-w64-ucrt-x86_64-cyrus-sasl \
+  mingw-w64-ucrt-x86_64-nsis \
+  mingw-w64-ucrt-x86_64-ntldd \
+  git python
+```
+
+## Build a partir de um clone novo
+
+No terminal **MSYS2 UCRT64**:
+
+```bash
+git clone https://github.com/marcus-piccoli/veyon.git
 cd veyon
 git checkout veyon-fix/fresh-dns-windows
-git submodule update --init --recursive
-python patches/apply_veyon_fix.py
+./scripts/build-veyon-fix-windows.sh
 ```
 
-O ZIP gerado pelo workflow já vem com a transformação aplicada, portanto não execute novamente `apply_veyon_fix.py` nele.
+O script executa todo o processo:
 
-### 3. Configurar build
+1. valida se o terminal é UCRT64 e se as alterações do Veyon Fix estão presentes;
+2. inicializa todos os submódulos;
+3. aplica `patches/libvncserver-mingw-unicode.patch` ao LibVNCServer somente durante a build e restaura o submódulo ao terminar;
+4. baixa o Interception e fixa a fonte no commit `39eecbbc46a52e0402f783b872ef62b0254a896a`;
+5. compila `interception.dll` e instala temporariamente header/import library/runtime no prefixo `/ucrt64`;
+6. cria uma build limpa em `build-veyon-fix/` com Qt 6, LibVNC embutido, testes desativados e traduções da aplicação desativadas;
+7. compila o Veyon;
+8. monta a árvore redistribuível com executáveis, plugins, drivers e plugins Qt;
+9. usa `ntldd -R` para coletar recursivamente apenas as DLLs resolvidas em `/ucrt64/bin`;
+10. converte os caminhos de entrada do NSIS para caminhos baseados em `${__FILEDIR__}`, tornando a geração independente do diretório corrente;
+11. torna `translations/*.qm` e `styles/*.dll` opcionais nesta build;
+12. executa `makensis` e gera o instalador;
+13. calcula SHA-256 do instalador.
 
-Abra um terminal onde `qt-cmake`, `cmake`, `ninja` e o compilador MinGW estejam no PATH.
+## Saída
+
+Quando tudo termina corretamente:
+
+```text
+artifacts/veyon-4.11.2.0-win64-setup.exe
+artifacts/veyon-4.11.2.0-win64-setup.exe.sha256
+```
+
+A árvore intermediária do pacote fica em:
+
+```text
+build-veyon-fix/veyon-win64-4.11.2.0/
+```
+
+Os diretórios `build/`, `build-veyon-fix/`, `.veyon-fix-cache/` e `artifacts/` são artefatos locais e não devem ser versionados.
+
+## Detalhes importantes
+
+### Patch do LibVNCServer
+
+A definição `UNICODE` usada pelo Veyon faz com que `GetComputerName` seja expandido para `GetComputerNameW`, enquanto o buffer legado do LibVNCServer é `char*`. O patch preservado no repositório muda explicitamente essa chamada para `GetComputerNameA`.
+
+O script aplica esse patch de forma idempotente. Se o patch já estiver aplicado, ele não o aplica novamente. Se o submódulo contiver alterações locais não relacionadas, a build é interrompida em vez de sobrescrevê-las.
+
+### Interception
+
+A biblioteca de usuário do Interception não está presente no submódulo `3rdparty/interception` do Veyon. O fluxo clona o projeto original e usa um commit fixo para evitar que uma alteração futura no upstream mude silenciosamente a build.
+
+### Dependências redistribuíveis
+
+O empacotamento não usa os caminhos antigos de `WindowsInstaller.cmake` feitos para a imagem de CI do Veyon. Em vez disso, analisa os binários gerados e copia as dependências reais encontradas no prefixo UCRT64.
+
+Entradas `ext-ms-win-*` vistas pelo `ntldd` são API Sets do Windows e não são copiadas para o pacote.
+
+### LibVNC
+
+A configuração usa:
+
+```text
+WITH_BUNDLED_LIBVNC=ON
+```
+
+Por isso o pacote não adiciona `libvncclient.dll` ou `libvncserver.dll` externos.
+
+### Traduções
+
+A build reproduzível usa `WITH_TRANSLATIONS=OFF` porque a geração de traduções apresentou incompatibilidade no ambiente nativo UCRT64 usado durante o desenvolvimento. O instalador NSIS continua podendo mostrar os idiomas próprios do instalador, mas os arquivos `.qm` da aplicação não são obrigatórios nesta variante.
+
+## Como confirmar que a correção DNS está presente
+
+No source:
 
 ```bash
-mkdir build
-cd build
-qt-cmake .. -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+grep -n "DNS_QUERY_BYPASS_CACHE" core/src/VncConnection.cpp
+grep -n -- "-ldnsapi" core/CMakeLists.txt
 ```
 
-Se o CMake apontar uma dependência ausente, instale o pacote correspondente e execute o comando novamente.
-
-### 4. Compilar
-
-```bash
-ninja
-```
-
-Para os alvos de empacotamento Windows fornecidos pelo Veyon, consulte os alvos disponíveis:
-
-```bash
-ninja -t targets | findstr /I "windows package installer nsis"
-```
-
-O script oficial usado pelo projeto para cross-build é `.ci/windows/build.sh`; ele chama o alvo `windows-binaries` por padrão.
-
-### 5. Gerar binários/instalador
-
-Tente primeiro:
-
-```bash
-ninja windows-binaries
-```
-
-Caso o projeto exponha um alvo NSIS separado na sua configuração, execute também esse alvo conforme listado por `ninja -t targets`.
-
-Os artefatos Windows do pipeline oficial usam nomes `veyon-*win*`.
-
-## Como confirmar que a correção está presente
-
-No source modificado, `core/src/VncConnection.cpp` deve conter mensagens de log com:
-
-`Veyon Fix fresh DNS:`
-
-E `core/CMakeLists.txt` deve vincular `dnsapi` no Windows.
-
-## Observação importante
-
-A correção força nova consulta ao DNS local sem reutilizar o cache do resolvedor Windows. Ela não consegue corrigir um registro que já esteja desatualizado no servidor DNS autoritativo/DHCP. Os logs foram adicionados justamente para distinguir esses dois casos.
+A correção força nova consulta DNS no lado que inicia a conexão. Ela não corrige um registro que permaneça desatualizado no servidor DNS/DHCP nem problemas de roteamento entre VLANs/sub-redes.

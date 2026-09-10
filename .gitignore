@@ -4,3 +4,7 @@ svg
 Makefile
 plugins/addons
 plugins/extra
+/build/
+/build-veyon-fix/
+/.veyon-fix-cache/
+/artifacts/

@@ -6,7 +6,11 @@ on:
     branches:
       - "veyon-fix/fresh-dns-windows"
     paths:
-      - "patches/apply_veyon_fix.py"
+      - "core/src/VncConnection.cpp"
+      - "core/CMakeLists.txt"
+      - "CMakeLists.txt"
+      - "patches/libvncserver-mingw-unicode.patch"
+      - "scripts/build-veyon-fix-windows.sh"
       - "BUILD_VEYON_FIX_WINDOWS.md"
       - ".github/workflows/veyon-fix-source-bundle.yml"
 
@@ -20,21 +24,27 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply Veyon Fix source changes
-        run: python3 patches/apply_veyon_fix.py
-
-      - name: Validate source tree
+      - name: Validate committed Veyon Fix source
         run: |
           git diff --check
-          grep -q "Veyon Fix fresh DNS:" core/src/VncConnection.cpp
+          grep -q "DNS_QUERY_BYPASS_CACHE" core/src/VncConnection.cpp
           grep -q -- "-ldnsapi" core/CMakeLists.txt
+          grep -q "CMAKE_SIZEOF_VOID_P EQUAL 8" CMakeLists.txt
+          test -f patches/libvncserver-mingw-unicode.patch
+          test -f scripts/build-veyon-fix-windows.sh
 
       - name: Prepare source directory
         run: |
           rm -rf dist
           mkdir -p dist/veyon-fix-4.11.2-source
-          rsync -a --exclude='.git' --exclude='dist' ./ dist/veyon-fix-4.11.2-source/
-          cp BUILD_VEYON_FIX_WINDOWS.md dist/veyon-fix-4.11.2-source/
+          rsync -a \
+            --exclude='.git' \
+            --exclude='dist' \
+            --exclude='build' \
+            --exclude='build-veyon-fix' \
+            --exclude='.veyon-fix-cache' \
+            --exclude='artifacts' \
+            ./ dist/veyon-fix-4.11.2-source/
 
       - name: Create ZIP
         run: |

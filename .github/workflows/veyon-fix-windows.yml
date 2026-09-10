@@ -16,11 +16,15 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply Veyon Fix source changes
-        run: python3 patches/apply_veyon_fix.py
+      - name: Validate committed Veyon Fix source
+        run: |
+          grep -q "DNS_QUERY_BYPASS_CACHE" core/src/VncConnection.cpp
+          grep -q -- "-ldnsapi" core/CMakeLists.txt
+          grep -q "CMAKE_SIZEOF_VOID_P EQUAL 8" CMakeLists.txt
+          git diff --check
 
-      - name: Show resulting diff
-        run: git diff --check && git diff -- core/src/VncConnection.cpp core/CMakeLists.txt
+      - name: Apply bundled LibVNCServer compatibility patch
+        run: git -C 3rdparty/libvncserver apply "$GITHUB_WORKSPACE/patches/libvncserver-mingw-unicode.patch"
 
       - name: Build Windows x64 using Veyon GitLab CI image
         run: |
