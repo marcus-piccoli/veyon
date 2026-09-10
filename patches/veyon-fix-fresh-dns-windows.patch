@@ -1,0 +1,139 @@
+diff --git a/core/src/VncConnection.cpp b/core/src/VncConnection.cpp
+--- a/core/src/VncConnection.cpp
++++ b/core/src/VncConnection.cpp
+@@ -24,6 +24,11 @@
+  *
+  */
+ 
++#ifdef _WIN32
++#include <winsock2.h>
++#include <windns.h>
++#endif
++
+ #include <rfb/rfbclient.h>
+ 
+ #include <cstdio>
+@@ -34,6 +39,7 @@
+ #include <QPixmap>
+ #include <QRegularExpression>
++#include <QStringList>
+ #include <QTime>
+ 
+ #include "PlatformNetworkFunctions.h"
+@@ -42,6 +48,46 @@
+ #include "VncEvents.h"
+ 
+ 
++#ifdef _WIN32
++static QStringList resolveFreshIpv4Addresses( const QString& host )
++{
++	QHostAddress literalAddress( host );
++	if( literalAddress.protocol() == QAbstractSocket::IPv4Protocol )
++	{
++		return { literalAddress.toString() };
++	}
++
++	PDNS_RECORDW records = nullptr;
++	const auto status = DnsQuery_W( reinterpret_cast<PCWSTR>( host.utf16() ),
++								 DNS_TYPE_A,
++								 DNS_QUERY_BYPASS_CACHE,
++								 nullptr,
++								 &records,
++								 nullptr );
++
++	if( status != ERROR_SUCCESS )
++	{
++		vDebug() << "Veyon Fix fresh DNS lookup failed for" << host << "status" << status;
++		return {};
++	}
++
++	QStringList addresses;
++	for( auto record = records; record != nullptr; record = record->pNext )
++	{
++		if( record->wType == DNS_TYPE_A )
++		{
++			const QHostAddress address( ntohl( record->Data.A.IpAddress ) );
++			if( address.protocol() == QAbstractSocket::IPv4Protocol )
++			{
++				addresses.append( address.toString() );
++			}
++		}
++	}
++
++	DnsRecordListFree( records, DnsFreeRecordList );
++	addresses.removeDuplicates();
++	return addresses;
++}
++#endif
++
++
+ rfbBool VncConnection::hookInitFrameBuffer( rfbClient* client )
+ {
+ 	auto connection = static_cast<VncConnection *>( clientData( client, VncConnectionTag ) );
+@@ -483,6 +529,7 @@ void VncConnection::establishConnection()
+ {
+ 	QMutex sleeperMutex;
++	qsizetype freshDnsAddressIndex = 0;
+ 
+ 	setState( State::Connecting );
+ 	setControlFlag( ControlFlag::RestartConnection, false );
+@@ -511,6 +558,27 @@ void VncConnection::establishConnection()
+ 
+ 		Q_EMIT connectionPrepared();
+ 
++		QString configuredHost;
++		{
++			QMutexLocker locker( &m_globalMutex );
++			configuredHost = m_host;
++		}
++
++		QString connectionHost = configuredHost;
++#ifdef _WIN32
++		const auto freshAddresses = resolveFreshIpv4Addresses( configuredHost );
++		if( freshAddresses.isEmpty() == false )
++		{
++			connectionHost = freshAddresses.at( freshDnsAddressIndex % freshAddresses.size() );
++			++freshDnsAddressIndex;
++			vDebug() << "Veyon Fix fresh DNS:" << configuredHost << "->" << freshAddresses
++					 << "using" << connectionHost;
++		}
++		else
++		{
++			vDebug() << "Veyon Fix fresh DNS: falling back to configured host" << configuredHost;
++		}
++#endif
++
+ 		m_globalMutex.lock();
+ 
+ 		if( m_port < 0 ) // use default port?
+@@ -524,7 +592,7 @@ void VncConnection::establishConnection()
+ 		}
+ 
+ 		free( m_client->serverHost );
+-		m_client->serverHost = strdup( m_host.toUtf8().constData() );
++		m_client->serverHost = strdup( connectionHost.toUtf8().constData() );
+ 
+ 		m_globalMutex.unlock();
+ 
+@@ -564,7 +632,7 @@ void VncConnection::establishConnection()
+ 				}
+ 				else
+ 				{
+-					const auto pingResult = VeyonCore::platform().networkFunctions().ping(m_host);
++					const auto pingResult = VeyonCore::platform().networkFunctions().ping(connectionHost);
+ 					switch (pingResult)
+ 					{
+ 					case PlatformNetworkFunctions::PingResult::ReplyReceived:
+diff --git a/core/CMakeLists.txt b/core/CMakeLists.txt
+--- a/core/CMakeLists.txt
++++ b/core/CMakeLists.txt
+@@ -56,7 +56,8 @@ endif()
+ 
+ if(VEYON_BUILD_WINDOWS)
+ 	# add Windows Socket library required by libvncclient
+-	target_link_libraries(veyon-core PRIVATE -lws2_32)
++	# dnsapi is required by the Veyon Fix fresh DNS resolver
++	target_link_libraries(veyon-core PRIVATE -lws2_32 -ldnsapi)
+ 	set_target_properties(veyon-core PROPERTIES PREFIX "")
+ 	add_windows_resources(veyon-core
+ 		NAME VeyonCore
