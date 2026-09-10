@@ -16,8 +16,11 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Apply fresh DNS patch
-        run: git apply --check patches/veyon-fix-fresh-dns-windows.patch && git apply patches/veyon-fix-fresh-dns-windows.patch
+      - name: Apply Veyon Fix source changes
+        run: python3 patches/apply_veyon_fix.py
+
+      - name: Show resulting diff
+        run: git diff --check && git diff -- core/src/VncConnection.cpp core/CMakeLists.txt
 
       - name: Build Windows x64 using Veyon CI image
         run: |
