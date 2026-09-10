@@ -22,12 +22,13 @@ jobs:
       - name: Show resulting diff
         run: git diff --check && git diff -- core/src/VncConnection.cpp core/CMakeLists.txt
 
-      - name: Build Windows x64 using Veyon CI image
+      - name: Build Windows x64 using Veyon GitLab CI image
         run: |
+          docker pull registry.gitlab.com/veyon/ci-mingw-w64:main
           docker run --rm \
             -v "$GITHUB_WORKSPACE:/veyon" \
             -w /veyon \
-            veyon/ci-mingw-w64:main \
+            registry.gitlab.com/veyon/ci-mingw-w64:main \
             bash -lc '.ci/windows/build.sh x86_64'
 
       - name: Collect build outputs
